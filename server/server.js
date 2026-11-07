@@ -92,7 +92,7 @@ const PORT = process.env.PORT || 5000;
 // Start Server after connecting to MongoDB
 connectDB().then(async () => {
   await seedInitialData();
-  app.listen(PORT, () => {
-    console.log(`Digital Muster Register backend running on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Digital Muster Register backend running on port ${PORT}`);
   });
 });
