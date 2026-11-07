@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: digital-muster-register
+    env: node
+    plan: free
+    buildCommand: npm run render-build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEFAULT_OWNER_USERNAME
+        value: owner
+      - key: DEFAULT_OWNER_PASSWORD
+        value: construction123
