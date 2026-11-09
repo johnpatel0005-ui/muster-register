@@ -394,8 +394,6 @@ router.get('/muster', protect, async (req, res) => {
       date: { $regex: regexPattern },
       worker: { $in: workerIds },
     });
-      date: { $regex: regexPattern },
-    });
 
     // Map attendance by workerId -> date -> record
     const attendanceMap = new Map();
