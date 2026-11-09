@@ -37,14 +37,15 @@ export const PaymentsPage = () => {
 
   const currency = site?.currencySymbol || '₹';
 
-  // Load all payments, workers, and balances
+  // Load all payments, workers, and balances for current site
   const loadData = async () => {
     try {
       setLoading(true);
+      const siteQuery = site?._id ? `?siteId=${site._id}` : '';
       const [workersRes, paymentsRes, balancesRes] = await Promise.all([
-        authFetch('/api/workers'),
-        authFetch('/api/payments'),
-        authFetch('/api/payments/balances'),
+        authFetch(`/api/workers${siteQuery}`),
+        authFetch(`/api/payments${siteQuery}`),
+        authFetch(`/api/payments/balances${siteQuery}`),
       ]);
 
       if (workersRes.ok && paymentsRes.ok && balancesRes.ok) {
@@ -56,10 +57,13 @@ export const PaymentsPage = () => {
         setPayments(paymentsData);
         setBalances(balancesData);
 
-        if (workersData.length > 0 && !workerId) {
+        if (workersData.length > 0) {
           const firstId = workersData[0]._id;
           setWorkerId(firstId);
           fetchWorkerBalance(firstId);
+        } else {
+          setWorkerId('');
+          setSelectedWorkerBalance(null);
         }
       }
     } catch (err) {
@@ -71,7 +75,7 @@ export const PaymentsPage = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [site?._id]);
 
   // Fetch single worker's live balance breakdown
   const fetchWorkerBalance = async (wId) => {

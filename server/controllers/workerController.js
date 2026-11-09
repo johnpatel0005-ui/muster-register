@@ -3,9 +3,10 @@ import Attendance from '../models/Attendance.js';
 import Payment from '../models/Payment.js';
 import Site from '../models/Site.js';
 
-// Helper to generate the next unique Worker ID (e.g., WRK-001, WRK-002)
-export const generateNextWorkerId = async () => {
-  const workers = await Worker.find({}, { workerId: 1 }).lean();
+// Helper to generate the next unique Worker ID for a given site (e.g., WRK-001, WRK-002)
+export const generateNextWorkerId = async (siteId) => {
+  const filter = siteId ? { site: siteId } : {};
+  const workers = await Worker.find(filter, { workerId: 1 }).lean();
   let maxNum = 0;
 
   for (const w of workers) {
@@ -24,19 +25,47 @@ export const generateNextWorkerId = async () => {
   return `WRK-${String(nextNum).padStart(3, '0')}`;
 };
 
-// Backfill existing workers who might not have workerId or new fields
+// Backfill existing workers who might not have workerId, site, or new fields
 export const backfillExistingWorkers = async () => {
   try {
+    let defaultSite = await Site.findOne();
+    if (!defaultSite) {
+      defaultSite = await Site.create({
+        name: 'Main Construction Project',
+        location: 'Site Location #1',
+        ownerName: 'Site Owner',
+        standardDailyHours: 8,
+        currencySymbol: '₹',
+        isDefault: true,
+      });
+    }
+
+    // Drop legacy global unique workerId index in favor of compound { site: 1, workerId: 1 }
+    try {
+      const indexes = await Worker.collection.indexes();
+      const hasOldIdx = indexes.some((idx) => idx.name === 'workerId_1' && idx.unique);
+      if (hasOldIdx) {
+        await Worker.collection.dropIndex('workerId_1');
+        console.log('Migrated index: Dropped legacy global workerId_1 in favor of site-scoped index');
+      }
+    } catch (idxErr) {
+      // Index might not exist yet, ignore
+    }
+
     const workers = await Worker.find({});
     let nextNum = 1;
 
     for (const worker of workers) {
       let modified = false;
 
+      if (!worker.site) {
+        worker.site = defaultSite._id;
+        modified = true;
+      }
+
       if (!worker.workerId) {
-        // Find an unused WRK-XXX
         let candidateId = `WRK-${String(nextNum).padStart(3, '0')}`;
-        while (await Worker.findOne({ workerId: candidateId })) {
+        while (await Worker.findOne({ site: worker.site, workerId: candidateId })) {
           nextNum++;
           candidateId = `WRK-${String(nextNum).padStart(3, '0')}`;
         }
@@ -46,7 +75,7 @@ export const backfillExistingWorkers = async () => {
       }
 
       if (!worker.standardWorkingHours) {
-        worker.standardWorkingHours = 8;
+        worker.standardWorkingHours = defaultSite.standardDailyHours || 8;
         modified = true;
       }
 
@@ -74,26 +103,47 @@ export const backfillExistingWorkers = async () => {
         await worker.save();
       }
     }
+
+    // Backfill attendance records missing site
+    const unassignedAttendance = await Attendance.find({ site: { $exists: false } }).populate('worker');
+    for (const att of unassignedAttendance) {
+      att.site = att.worker?.site || defaultSite._id;
+      await att.save();
+    }
+
+    // Backfill payments missing site
+    const unassignedPayments = await Payment.find({ site: { $exists: false } }).populate('worker');
+    for (const pay of unassignedPayments) {
+      pay.site = pay.worker?.site || defaultSite._id;
+      await pay.save();
+    }
   } catch (error) {
-    console.error('Worker backfill error:', error.message);
+    console.error('Worker & site backfill error:', error.message);
   }
 };
 
-// GET /api/workers/next-id - preview the next worker ID
+// GET /api/workers/next-id - preview the next worker ID for a site
 export const getNextId = async (req, res) => {
   try {
-    const nextId = await generateNextWorkerId();
+    const siteId = req.query.siteId || req.query.site;
+    const nextId = await generateNextWorkerId(siteId);
     res.json({ nextId });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// GET /api/workers - list workers with search & status filter
+// GET /api/workers - list workers with search, status, and site filter
 export const getWorkers = async (req, res) => {
   try {
-    const { search, status, workType } = req.query;
+    const { search, status, workType, siteId, site } = req.query;
     const filter = {};
+
+    // Filter by site
+    const targetSiteId = siteId || site;
+    if (targetSiteId && targetSiteId !== 'all') {
+      filter.site = targetSiteId;
+    }
 
     // Filter by status (active / inactive / all)
     if (status && status !== 'all') {
@@ -125,7 +175,9 @@ export const getWorkers = async (req, res) => {
       });
     }
 
-    const workers = await Worker.find(filter).sort({ workerId: 1, name: 1 });
+    const workers = await Worker.find(filter)
+      .populate('site', 'name location currencySymbol standardDailyHours')
+      .sort({ workerId: 1, name: 1 });
     res.json(workers);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -135,7 +187,7 @@ export const getWorkers = async (req, res) => {
 // GET /api/workers/:id - single worker details + historical statistics
 export const getWorkerById = async (req, res) => {
   try {
-    const worker = await Worker.findById(req.params.id);
+    const worker = await Worker.findById(req.params.id).populate('site', 'name location currencySymbol standardDailyHours');
     if (!worker) {
       return res.status(404).json({ message: 'Worker not found' });
     }
@@ -169,10 +221,12 @@ export const getWorkerById = async (req, res) => {
   }
 };
 
-// POST /api/workers - create worker with auto-generated unique ID
+// POST /api/workers - create worker with auto-generated unique ID for site
 export const createWorker = async (req, res) => {
   try {
     let {
+      siteId,
+      site,
       workerId,
       name,
       mobileNumber,
@@ -187,7 +241,6 @@ export const createWorker = async (req, res) => {
       notes,
     } = req.body;
 
-    // Validate required fields
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Worker name is required' });
     }
@@ -196,24 +249,38 @@ export const createWorker = async (req, res) => {
       return res.status(400).json({ message: 'A valid daily wage rate is required' });
     }
 
-    // Auto-generate or sanitize unique workerId
+    // Determine target site
+    let targetSite = null;
+    const assignedSiteId = siteId || site;
+    if (assignedSiteId) {
+      targetSite = await Site.findById(assignedSiteId);
+    }
+    if (!targetSite) {
+      targetSite = await Site.findOne();
+    }
+    if (!targetSite) {
+      return res.status(400).json({ message: 'No construction site found. Please create a site first.' });
+    }
+
+    // Auto-generate or sanitize unique workerId for this site
     if (!workerId || !workerId.trim()) {
-      workerId = await generateNextWorkerId();
+      workerId = await generateNextWorkerId(targetSite._id);
     } else {
       workerId = workerId.trim().toUpperCase();
-      const existing = await Worker.findOne({ workerId });
+      const existing = await Worker.findOne({ site: targetSite._id, workerId });
       if (existing) {
-        return res.status(400).json({ message: `Worker ID "${workerId}" already exists. Please choose a unique ID.` });
+        return res.status(400).json({
+          message: `Worker ID "${workerId}" already exists at ${targetSite.name}. Please choose a unique ID.`,
+        });
       }
     }
 
-    // Default site standard daily hours if not provided
     if (!standardWorkingHours) {
-      const site = await Site.findOne();
-      standardWorkingHours = site?.standardDailyHours || 8;
+      standardWorkingHours = targetSite.standardDailyHours || 8;
     }
 
     const worker = await Worker.create({
+      site: targetSite._id,
       workerId,
       name: name.trim(),
       mobileNumber: (mobileNumber || phone || '').trim(),
@@ -228,19 +295,22 @@ export const createWorker = async (req, res) => {
       notes: (notes || '').trim(),
     });
 
-    res.status(201).json(worker);
+    const populated = await Worker.findById(worker._id).populate('site', 'name location currencySymbol standardDailyHours');
+    res.status(201).json(populated);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: 'Worker ID must be unique. A worker with this ID already exists.' });
+      return res.status(400).json({ message: 'Worker ID must be unique within this site.' });
     }
     res.status(500).json({ message: error.message });
   }
 };
 
-// PUT /api/workers/:id - edit worker details
+// PUT /api/workers/:id - edit worker details or transfer site
 export const updateWorker = async (req, res) => {
   try {
     const {
+      siteId,
+      site,
       workerId,
       name,
       mobileNumber,
@@ -260,12 +330,22 @@ export const updateWorker = async (req, res) => {
       return res.status(404).json({ message: 'Worker not found' });
     }
 
-    // Check if workerId is being changed to another that already exists
-    if (workerId && workerId.trim().toUpperCase() !== worker.workerId) {
-      const targetId = workerId.trim().toUpperCase();
-      const existing = await Worker.findOne({ workerId: targetId });
+    // Check site transfer
+    const newSiteId = siteId || site;
+    if (newSiteId && newSiteId.toString() !== (worker.site?.toString() || '')) {
+      const targetSite = await Site.findById(newSiteId);
+      if (!targetSite) {
+        return res.status(400).json({ message: 'Target construction site not found.' });
+      }
+      worker.site = targetSite._id;
+    }
+
+    // Check workerId uniqueness within the worker's site
+    const targetId = workerId ? workerId.trim().toUpperCase() : worker.workerId;
+    if (targetId !== worker.workerId || newSiteId) {
+      const existing = await Worker.findOne({ site: worker.site, workerId: targetId });
       if (existing && existing._id.toString() !== worker._id.toString()) {
-        return res.status(400).json({ message: `Worker ID "${targetId}" is already assigned to another worker.` });
+        return res.status(400).json({ message: `Worker ID "${targetId}" is already assigned to another worker at this site.` });
       }
       worker.workerId = targetId;
     }
@@ -289,10 +369,11 @@ export const updateWorker = async (req, res) => {
     if (notes !== undefined) worker.notes = notes.trim();
 
     await worker.save();
-    res.json(worker);
+    const populated = await Worker.findById(worker._id).populate('site', 'name location currencySymbol standardDailyHours');
+    res.json(populated);
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(400).json({ message: 'Worker ID must be unique.' });
+      return res.status(400).json({ message: 'Worker ID must be unique within this site.' });
     }
     res.status(500).json({ message: error.message });
   }
@@ -310,7 +391,6 @@ export const toggleWorkerStatus = async (req, res) => {
     if (status && ['active', 'inactive'].includes(status)) {
       worker.status = status;
     } else {
-      // Toggle
       worker.status = worker.status === 'active' ? 'inactive' : 'active';
     }
 
@@ -347,7 +427,7 @@ export const deleteWorker = async (req, res) => {
       });
     }
 
-    // No historical records exist, safe to remove completely
+    // Safe to delete if no historical records
     await Worker.findByIdAndDelete(worker._id);
     res.json({ message: 'Worker deleted successfully' });
   } catch (error) {

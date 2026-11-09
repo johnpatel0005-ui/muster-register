@@ -99,19 +99,32 @@ export const calculateShiftWage = ({
   };
 };
 
-// GET /api/attendance/daily?date=YYYY-MM-DD
-// Returns attendance for all active workers for the selected date
+// GET /api/attendance/daily?date=YYYY-MM-DD&siteId=...
+// Returns attendance for all active workers for the selected date and site
 router.get('/daily', protect, async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
-    const site = await Site.findOne();
+    const siteId = req.query.siteId || req.query.site;
+
+    let site = null;
+    if (siteId && siteId !== 'all') {
+      site = await Site.findById(siteId);
+    }
+    if (!site) {
+      site = await Site.findOne();
+    }
     const defaultSiteHours = site?.standardDailyHours || 8;
 
-    // Get all active workers
-    const workers = await Worker.find({ status: 'active' }).sort({ workerId: 1, name: 1 });
+    // Get all active workers for this site
+    const workerFilter = { status: 'active' };
+    if (site) {
+      workerFilter.site = site._id;
+    }
+    const workers = await Worker.find(workerFilter).sort({ workerId: 1, name: 1 });
+    const workerIds = workers.map((w) => w._id);
 
-    // Get attendance records for this date
-    const records = await Attendance.find({ date });
+    // Get attendance records for this date and workers
+    const records = await Attendance.find({ date, worker: { $in: workerIds } });
     const recordMap = new Map();
     records.forEach((r) => recordMap.set(r.worker.toString(), r));
 
@@ -276,11 +289,14 @@ router.post('/batch', protect, async (req, res) => {
         status,
       });
 
+      const siteId = worker?.site || site?._id;
+
       bulkOps.push({
         updateOne: {
           filter: { worker: entry.workerId, date },
           update: {
             $set: {
+              site: siteId,
               status: calculated.status,
               inTime: calculated.inTime,
               outTime: calculated.outTime,
@@ -347,21 +363,37 @@ router.get('/muster', protect, async (req, res) => {
       formattedMonth = `${year}-${String(monthNum).padStart(2, '0')}`;
     }
 
-    const site = await Site.findOne();
+    const siteId = req.query.siteId || req.query.site;
+    let site = null;
+    if (siteId && siteId !== 'all') {
+      site = await Site.findById(siteId);
+    }
+    if (!site) {
+      site = await Site.findOne();
+    }
     const standardHours = site?.standardDailyHours || 8;
     const daysInMonth = new Date(year, monthNum, 0).getDate();
 
-    // Fetch all workers (active & inactive to preserve historical records)
-    const workers = await Worker.find().sort({ workerId: 1, name: 1 });
+    // Fetch workers for this site (active & inactive to preserve historical records)
+    const workerFilter = {};
+    if (site) {
+      workerFilter.site = site._id;
+    }
+    const workers = await Worker.find(workerFilter).sort({ workerId: 1, name: 1 });
+    const workerIds = workers.map((w) => w._id);
 
-    // Fetch monthly attendance records
+    // Fetch monthly attendance records for these workers
     const regexPattern = `^${formattedMonth}-`;
     const attendanceRecords = await Attendance.find({
       date: { $regex: regexPattern },
+      worker: { $in: workerIds },
     });
 
-    // Fetch monthly payment records
+    // Fetch monthly payment records for these workers
     const paymentRecords = await Payment.find({
+      date: { $regex: regexPattern },
+      worker: { $in: workerIds },
+    });
       date: { $regex: regexPattern },
     });
 

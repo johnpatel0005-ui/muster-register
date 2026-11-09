@@ -11,6 +11,7 @@ import workersRoutes from './routes/workers.js';
 import attendanceRoutes from './routes/attendance.js';
 import paymentsRoutes from './routes/payments.js';
 import settingsRoutes from './routes/settings.js';
+import sitesRoutes from './routes/sites.js';
 
 import User from './models/User.js';
 import Site from './models/Site.js';
@@ -36,6 +37,7 @@ app.use('/api/workers', workersRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/sites', sitesRoutes);
 
 // Serve static frontend build in production
 const __filename = fileURLToPath(import.meta.url);

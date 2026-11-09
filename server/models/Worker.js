@@ -2,10 +2,15 @@ import mongoose from 'mongoose';
 
 const workerSchema = new mongoose.Schema(
   {
+    site: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Site',
+      required: [true, 'Site is required'],
+      index: true,
+    },
     workerId: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
       uppercase: true,
     },
@@ -73,6 +78,9 @@ const workerSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Compound index: Unique workerId per site
+workerSchema.index({ site: 1, workerId: 1 }, { unique: true });
 
 // Synchronize mobileNumber <-> phone and workType <-> trade
 workerSchema.pre('validate', function (next) {

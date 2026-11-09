@@ -8,6 +8,11 @@ const attendanceSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    site: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Site',
+      index: true,
+    },
     date: {
       type: String, // Stored as YYYY-MM-DD
       required: true,

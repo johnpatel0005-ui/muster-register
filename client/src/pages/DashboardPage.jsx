@@ -9,8 +9,10 @@ export const DashboardPage = () => {
 
   useEffect(() => {
     const fetchDashboard = async () => {
+      if (!site?._id) return;
       try {
-        const res = await authFetch('/api/settings/dashboard');
+        setLoading(true);
+        const res = await authFetch(`/api/settings/dashboard?siteId=${site._id}`);
         if (res.ok) {
           const json = await res.json();
           setData(json);
@@ -23,7 +25,7 @@ export const DashboardPage = () => {
     };
 
     fetchDashboard();
-  }, []);
+  }, [site?._id]);
 
   if (loading) {
     return <div className="register-panel">Loading site dashboard...</div>;

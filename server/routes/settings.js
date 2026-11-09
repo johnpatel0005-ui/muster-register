@@ -7,10 +7,17 @@ import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get site settings
+// Get site settings (optionally for specific site)
 router.get('/', protect, async (req, res) => {
   try {
-    let site = await Site.findOne();
+    const siteId = req.query.siteId || req.query.site;
+    let site = null;
+    if (siteId && siteId !== 'all') {
+      site = await Site.findById(siteId);
+    }
+    if (!site) {
+      site = await Site.findOne();
+    }
     if (!site) {
       site = await Site.create({
         name: 'Om Sai Construction Site',
@@ -18,6 +25,7 @@ router.get('/', protect, async (req, res) => {
         ownerName: req.user.name,
         standardDailyHours: 8,
         currencySymbol: '₹',
+        isDefault: true,
       });
     }
     res.json(site);
@@ -29,9 +37,15 @@ router.get('/', protect, async (req, res) => {
 // Update site settings
 router.put('/', protect, async (req, res) => {
   try {
-    const { name, location, ownerName, standardDailyHours, currencySymbol } = req.body;
+    const { siteId, name, location, ownerName, standardDailyHours, currencySymbol } = req.body;
 
-    let site = await Site.findOne();
+    let site = null;
+    if (siteId) {
+      site = await Site.findById(siteId);
+    }
+    if (!site) {
+      site = await Site.findOne();
+    }
     if (!site) {
       site = new Site();
     }
@@ -49,30 +63,46 @@ router.put('/', protect, async (req, res) => {
   }
 });
 
-// Summary for dashboard
+// Summary for dashboard (scoped by site)
 router.get('/dashboard', protect, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
+    const siteId = req.query.siteId || req.query.site;
 
-    const totalWorkers = await Worker.countDocuments({ status: 'active' });
-    const site = await Site.findOne();
+    let site = null;
+    if (siteId && siteId !== 'all') {
+      site = await Site.findById(siteId);
+    }
+    if (!site) {
+      site = await Site.findOne();
+    }
 
-    // Today's attendance
-    const todayAttendance = await Attendance.find({ date: today }).populate('worker', 'workerId name workType trade dailyWage');
+    const workerFilter = { status: 'active' };
+    if (site) {
+      workerFilter.site = site._id;
+    }
+
+    const totalWorkers = await Worker.countDocuments(workerFilter);
+    const siteWorkerIds = await Worker.find(site ? { site: site._id } : {}).distinct('_id');
+
+    // Today's attendance for this site
+    const todayAttendance = await Attendance.find({ date: today, worker: { $in: siteWorkerIds } })
+      .populate('worker', 'workerId name workType trade dailyWage');
     const todayPresentCount = todayAttendance.filter(a => a.status === 'present' || a.hoursWorked > 0).length;
     const todayTotalHours = todayAttendance.reduce((acc, curr) => acc + (curr.hoursWorked || 0), 0);
     const todayWagesEarned = todayAttendance.reduce((acc, curr) => acc + (curr.wageEarned || 0), 0);
 
-    // Recent payments (last 5)
-    const recentPayments = await Payment.find()
+    // Recent payments for this site (last 5)
+    const recentPayments = await Payment.find({ worker: { $in: siteWorkerIds } })
       .sort({ createdAt: -1 })
       .limit(5)
       .populate('worker', 'workerId name workType trade dailyWage');
 
-    // Total payments made this month
+    // Total payments made this month for this site
     const currentMonthPrefix = today.substring(0, 7); // YYYY-MM
     const allMonthlyPayments = await Payment.find({
       date: { $regex: `^${currentMonthPrefix}` },
+      worker: { $in: siteWorkerIds },
     });
     const monthlyPaymentTotal = allMonthlyPayments.reduce((acc, curr) => acc + curr.amount, 0);
 
@@ -81,9 +111,9 @@ router.get('/dashboard', protect, async (req, res) => {
       today,
       totalActiveWorkers: totalWorkers,
       todayPresentCount,
-      todayTotalHours,
+      todayTotalHours: Math.round(todayTotalHours * 100) / 100,
       todayWagesEarned: Math.round(todayWagesEarned),
-      monthlyPaymentTotal,
+      monthlyPaymentTotal: Math.round(monthlyPaymentTotal),
       recentPayments,
     });
   } catch (error) {

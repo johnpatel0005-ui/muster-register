@@ -16,13 +16,20 @@ const normalizePaymentMethod = (method) => {
   return 'Other';
 };
 
-// GET /api/payments/balances - get all workers' calculated outstanding balances
+// GET /api/payments/balances - get workers' calculated outstanding balances (optionally filtered by site)
 router.get('/balances', protect, async (req, res) => {
   try {
-    const workers = await Worker.find().sort({ workerId: 1, name: 1 });
+    const siteId = req.query.siteId || req.query.site;
+    const workerFilter = {};
+    if (siteId && siteId !== 'all') {
+      workerFilter.site = siteId;
+    }
 
-    // Aggregate all earned wages per worker from Attendance
-    const attendances = await Attendance.find({}, { worker: 1, wageEarned: 1, status: 1 });
+    const workers = await Worker.find(workerFilter).sort({ workerId: 1, name: 1 });
+    const workerIds = workers.map((w) => w._id);
+
+    // Aggregate earned wages for these workers from Attendance
+    const attendances = await Attendance.find({ worker: { $in: workerIds } }, { worker: 1, wageEarned: 1, status: 1 });
     const earnedMap = new Map();
     for (const att of attendances) {
       if (att.worker) {
@@ -32,8 +39,8 @@ router.get('/balances', protect, async (req, res) => {
       }
     }
 
-    // Aggregate all advances and payments per worker from Payment
-    const payments = await Payment.find({}, { worker: 1, amount: 1, transactionType: 1, paymentType: 1 });
+    // Aggregate advances and payments for these workers from Payment
+    const payments = await Payment.find({ worker: { $in: workerIds } }, { worker: 1, amount: 1, transactionType: 1, paymentType: 1 });
     const advancesMap = new Map();
     const wagePaymentsMap = new Map();
 
@@ -128,13 +135,21 @@ router.get('/balance/:workerId', protect, async (req, res) => {
   }
 });
 
-// GET /api/payments - get list of payments/advances with filtering
+// GET /api/payments - get list of payments/advances with filtering (worker, site, date, type)
 router.get('/', protect, async (req, res) => {
   try {
-    const { workerId, date, month, transactionType, paymentMethod } = req.query;
+    const { workerId, siteId, site, date, month, transactionType, paymentMethod } = req.query;
     const filter = {};
 
-    if (workerId && workerId !== 'all') {
+    const targetSiteId = siteId || site;
+    if (targetSiteId && targetSiteId !== 'all') {
+      const siteWorkerIds = await Worker.find({ site: targetSiteId }).distinct('_id');
+      if (workerId && workerId !== 'all') {
+        filter.worker = workerId;
+      } else {
+        filter.worker = { $in: siteWorkerIds };
+      }
+    } else if (workerId && workerId !== 'all') {
       filter.worker = workerId;
     }
 
@@ -188,6 +203,7 @@ router.post('/', protect, async (req, res) => {
 
     const payment = await Payment.create({
       worker: workerId,
+      site: worker.site,
       amount: Math.round(numAmount * 100) / 100,
       date: paymentDate,
       transactionType: type,
@@ -221,6 +237,9 @@ router.put('/:id', protect, async (req, res) => {
         return res.status(404).json({ message: 'Worker not found' });
       }
       payment.worker = workerId;
+      if (worker.site) {
+        payment.site = worker.site;
+      }
     }
 
     if (amount !== undefined) {

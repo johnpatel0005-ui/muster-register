@@ -115,13 +115,15 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Get current owner info
+// Get current owner info & sites
 router.get('/me', protect, async (req, res) => {
   try {
-    const site = await Site.findOne();
+    const sites = await Site.find().sort({ createdAt: 1 });
+    const defaultSite = sites.find(s => s.isDefault) || sites[0] || { name: 'Construction Site', standardDailyHours: 8, currencySymbol: '₹' };
     res.json({
       user: req.user,
-      site: site || { name: 'Construction Site', standardDailyHours: 8, currencySymbol: '₹' },
+      site: defaultSite,
+      sites,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

@@ -72,14 +72,15 @@ export const AttendancePage = () => {
 
   const currency = site?.currencySymbol || '₹';
 
-  // Load attendance data for the selected date
+  // Load attendance data for the selected date and site
   const loadAttendance = async (date) => {
     try {
       setLoading(true);
       setError('');
       setMessage('');
 
-      const res = await authFetch(`/api/attendance/daily?date=${date}`);
+      const siteQuery = site?._id ? `&siteId=${site._id}` : '';
+      const res = await authFetch(`/api/attendance/daily?date=${date}${siteQuery}`);
       if (res.ok) {
         const data = await res.json();
         setSheet(data.sheet || []);
@@ -99,7 +100,7 @@ export const AttendancePage = () => {
 
   useEffect(() => {
     loadAttendance(selectedDate);
-  }, [selectedDate]);
+  }, [site?._id, selectedDate]);
 
   // Navigate date by +/- days
   const changeDateBy = (days) => {

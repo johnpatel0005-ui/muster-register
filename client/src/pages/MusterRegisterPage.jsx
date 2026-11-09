@@ -23,13 +23,14 @@ export const MusterRegisterPage = () => {
 
   const currency = site?.currencySymbol || '₹';
 
-  // Load muster register for selected month & year
+  // Load muster register for selected month & year for active site
   const loadMuster = async (monthNum, yearNum) => {
     try {
       setLoading(true);
       setError('');
       const formattedMonth = `${yearNum}-${String(monthNum).padStart(2, '0')}`;
-      const res = await authFetch(`/api/attendance/muster?month=${formattedMonth}`);
+      const siteQuery = site?._id ? `&siteId=${site._id}` : '';
+      const res = await authFetch(`/api/attendance/muster?month=${formattedMonth}${siteQuery}`);
       if (res.ok) {
         const data = await res.json();
         setRegisterData(data);
@@ -46,7 +47,7 @@ export const MusterRegisterPage = () => {
 
   useEffect(() => {
     loadMuster(selectedMonth, selectedYear);
-  }, [selectedMonth, selectedYear]);
+  }, [site?._id, selectedMonth, selectedYear]);
 
   // Navigate month by +/- 1
   const changeMonthBy = (delta) => {

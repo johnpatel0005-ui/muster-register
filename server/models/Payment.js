@@ -8,6 +8,11 @@ const paymentSchema = new mongoose.Schema(
       required: [true, 'Worker is required'],
       index: true,
     },
+    site: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Site',
+      index: true,
+    },
     transactionType: {
       type: String,
       enum: ['advance', 'wage_payment'],

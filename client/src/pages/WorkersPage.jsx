@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export const WorkersPage = () => {
-  const { authFetch, site } = useAuth();
+  const { authFetch, site, sites } = useAuth();
 
   // Workers data
   const [workers, setWorkers] = useState([]);
@@ -16,6 +16,7 @@ export const WorkersPage = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingWorkerId, setEditingWorkerId] = useState(null);
 
+  const [workerSiteId, setWorkerSiteId] = useState('');
   const [workerId, setWorkerId] = useState('');
   const [name, setName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
@@ -39,11 +40,12 @@ export const WorkersPage = () => {
 
   const currency = site?.currencySymbol || '₹';
 
-  // Load workers with active search and filter
+  // Load workers with active search, filter, and current site
   const loadWorkers = async (search = searchTerm, filter = statusFilter) => {
     try {
       setLoading(true);
       const params = new URLSearchParams();
+      if (site?._id) params.append('siteId', site._id);
       if (search.trim()) params.append('search', search.trim());
       if (filter && filter !== 'all') params.append('status', filter);
 
@@ -61,14 +63,16 @@ export const WorkersPage = () => {
 
   useEffect(() => {
     loadWorkers(searchTerm, statusFilter);
-  }, [searchTerm, statusFilter]);
+  }, [site?._id, searchTerm, statusFilter]);
 
   // Fetch next available Worker ID when opening "Add Worker"
   const handleOpenAddForm = async () => {
     resetForm();
     setShowForm(true);
+    const targetSiteId = site?._id || (sites[0]?._id) || '';
+    setWorkerSiteId(targetSiteId);
     try {
-      const res = await authFetch('/api/workers/next-id');
+      const res = await authFetch(`/api/workers/next-id?siteId=${targetSiteId}`);
       if (res.ok) {
         const data = await res.json();
         setWorkerId(data.nextId || 'WRK-001');
@@ -80,6 +84,7 @@ export const WorkersPage = () => {
 
   const resetForm = () => {
     setEditingWorkerId(null);
+    setWorkerSiteId(site?._id || '');
     setWorkerId('');
     setName('');
     setMobileNumber('');
@@ -96,6 +101,7 @@ export const WorkersPage = () => {
   // Populate form for editing
   const handleEditClick = (worker) => {
     setEditingWorkerId(worker._id);
+    setWorkerSiteId(worker.site?._id || worker.site || site?._id || '');
     setWorkerId(worker.workerId || '');
     setName(worker.name || '');
     setMobileNumber(worker.mobileNumber || worker.phone || '');
@@ -145,6 +151,7 @@ export const WorkersPage = () => {
 
     try {
       const payload = {
+        siteId: workerSiteId || site?._id,
         workerId: workerId.trim().toUpperCase(),
         name: name.trim(),
         mobileNumber: mobileNumber.trim(),
@@ -251,6 +258,39 @@ export const WorkersPage = () => {
 
           <form onSubmit={handleSubmit}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' }}>
+              <div className="form-group">
+                <label>Construction Site *</label>
+                <select
+                  className="form-control"
+                  value={workerSiteId}
+                  onChange={async (e) => {
+                    const newSid = e.target.value;
+                    setWorkerSiteId(newSid);
+                    if (!editingWorkerId) {
+                      try {
+                        const res = await authFetch(`/api/workers/next-id?siteId=${newSid}`);
+                        if (res.ok) {
+                          const data = await res.json();
+                          if (data.nextId) setWorkerId(data.nextId);
+                        }
+                      } catch (err) {
+                        console.error('Failed to get next ID:', err);
+                      }
+                    }
+                  }}
+                  required
+                >
+                  {sites.map((s) => (
+                    <option key={s._id} value={s._id}>
+                      {s.name} {s.location ? `(${s.location})` : ''}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Assigned project site
+                </span>
+              </div>
+
               <div className="form-group">
                 <label>Worker ID *</label>
                 <input

@@ -4,18 +4,18 @@ const siteSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      required: [true, 'Site name is required'],
       default: 'Main Construction Project',
       trim: true,
     },
     location: {
       type: String,
-      default: 'Site Location #1',
+      default: '',
       trim: true,
     },
     ownerName: {
       type: String,
-      default: 'Construction Contractor',
+      default: 'Site Owner',
       trim: true,
     },
     standardDailyHours: {
@@ -28,6 +28,16 @@ const siteSchema = new mongoose.Schema(
       type: String,
       default: '₹',
       trim: true,
+    },
+    status: {
+      type: String,
+      enum: ['active', 'completed', 'archived'],
+      default: 'active',
+      index: true,
+    },
+    isDefault: {
+      type: Boolean,
+      default: false,
     },
   },
   { timestamps: true }

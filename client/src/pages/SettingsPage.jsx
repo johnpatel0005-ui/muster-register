@@ -2,14 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 export const SettingsPage = () => {
-  const { authFetch, site, user, refreshSite } = useAuth();
+  const { authFetch, site, sites, selectSite, refreshSites, user } = useAuth();
 
-  // Site settings state
+  // Active Site settings state
   const [siteName, setSiteName] = useState('');
   const [location, setLocation] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [standardDailyHours, setStandardDailyHours] = useState(8);
   const [currencySymbol, setCurrencySymbol] = useState('₹');
+
+  // Add new site form state
+  const [showAddSiteForm, setShowAddSiteForm] = useState(false);
+  const [addSiteName, setAddSiteName] = useState('');
+  const [addSiteLocation, setAddSiteLocation] = useState('');
+  const [addSiteHours, setAddSiteHours] = useState(8);
+  const [addSiteCurrency, setAddSiteCurrency] = useState('₹');
+  const [addingSite, setAddingSite] = useState(false);
+  const [addSiteMsg, setAddSiteMsg] = useState('');
+  const [addSiteErr, setAddSiteErr] = useState('');
 
   // Password state
   const [currentPassword, setCurrentPassword] = useState('');
@@ -33,6 +43,7 @@ export const SettingsPage = () => {
     }
   }, [site]);
 
+  // Save current active site details
   const handleSaveSite = async (e) => {
     e.preventDefault();
     setSiteMessage('');
@@ -43,6 +54,7 @@ export const SettingsPage = () => {
       const res = await authFetch('/api/settings', {
         method: 'PUT',
         body: JSON.stringify({
+          siteId: site?._id,
           name: siteName,
           location,
           ownerName,
@@ -57,7 +69,7 @@ export const SettingsPage = () => {
       }
 
       setSiteMessage('Site settings updated successfully.');
-      refreshSite();
+      await refreshSites();
     } catch (err) {
       setSiteError(err.message);
     } finally {
@@ -65,6 +77,73 @@ export const SettingsPage = () => {
     }
   };
 
+  // Create a new site
+  const handleAddSite = async (e) => {
+    e.preventDefault();
+    setAddSiteMsg('');
+    setAddSiteErr('');
+
+    if (!addSiteName.trim()) {
+      setAddSiteErr('Site name is required');
+      return;
+    }
+
+    setAddingSite(true);
+
+    try {
+      const res = await authFetch('/api/sites', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: addSiteName.trim(),
+          location: addSiteLocation.trim(),
+          standardDailyHours: Number(addSiteHours) || 8,
+          currencySymbol: addSiteCurrency.trim() || '₹',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to create site');
+      }
+
+      setAddSiteMsg(`Site "${data.name}" created successfully!`);
+      setAddSiteName('');
+      setAddSiteLocation('');
+      setAddSiteHours(8);
+      setAddSiteCurrency('₹');
+      setShowAddSiteForm(false);
+
+      await refreshSites();
+      selectSite(data._id);
+    } catch (err) {
+      setAddSiteErr(err.message);
+    } finally {
+      setAddingSite(false);
+    }
+  };
+
+  // Delete a site
+  const handleDeleteSite = async (siteToDelete) => {
+    if (!window.confirm(`Are you sure you want to delete "${siteToDelete.name}"?`)) {
+      return;
+    }
+
+    try {
+      const res = await authFetch(`/api/sites/${siteToDelete._id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.message || 'Failed to delete site');
+        return;
+      }
+      await refreshSites();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Change password
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
     setPwdMessage('');
@@ -111,18 +190,175 @@ export const SettingsPage = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Register & Site Settings</h1>
+          <h1 className="page-title">Sites & Application Settings</h1>
           <div className="page-subtitle">
-            Configure site details, standard shift hours, and owner credentials
+            Manage multiple construction project sites, standard shifts, and account credentials
           </div>
         </div>
       </div>
 
+      {/* 1. All Construction Sites Ledger */}
+      <div className="register-panel" style={{ marginBottom: '20px' }}>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h3>All Construction Sites ({sites.length})</h3>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              Each site maintains its own separate workers, daily attendance, payments, and muster rolls
+            </span>
+          </div>
+
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowAddSiteForm(!showAddSiteForm)}
+          >
+            {showAddSiteForm ? '✕ Close Form' : '+ Add New Construction Site'}
+          </button>
+        </div>
+
+        {addSiteMsg && <div className="alert alert-success">{addSiteMsg}</div>}
+        {addSiteErr && <div className="alert alert-error">{addSiteErr}</div>}
+
+        {/* Add New Site Collapsible Form */}
+        {showAddSiteForm && (
+          <div style={{ backgroundColor: '#f9fafb', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '16px', margin: '14px 0' }}>
+            <h4 style={{ marginBottom: '12px' }}>+ New Construction Site Details</h4>
+            <form onSubmit={handleAddSite}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                <div className="form-group">
+                  <label>Site Name *</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Ring Road Overbridge Site"
+                    value={addSiteName}
+                    onChange={(e) => setAddSiteName(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Location / Address</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g. Padana GIDC, Jamnagar"
+                    value={addSiteLocation}
+                    onChange={(e) => setAddSiteLocation(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Standard Shift (Hours)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    className="form-control"
+                    value={addSiteHours}
+                    onChange={(e) => setAddSiteHours(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Currency</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={addSiteCurrency}
+                    onChange={(e) => setAddSiteCurrency(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button type="submit" className="btn btn-primary" disabled={addingSite}>
+                  {addingSite ? 'Creating...' : '✓ Create & Open Site'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddSiteForm(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Sites Table */}
+        <div className="table-container">
+          <table className="register-table">
+            <thead>
+              <tr>
+                <th>Site Name</th>
+                <th>Location</th>
+                <th>Active Workers</th>
+                <th>Standard Shift</th>
+                <th>Currency</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((s) => {
+                const isActiveCurrent = s._id === site?._id;
+                return (
+                  <tr key={s._id} style={isActiveCurrent ? { backgroundColor: '#f0fdf4' } : {}}>
+                    <td>
+                      <strong>{s.name}</strong>
+                      {isActiveCurrent && (
+                        <span style={{ marginLeft: '8px', fontSize: '11px', backgroundColor: '#15803d', color: '#fff', padding: '2px 6px', borderRadius: '3px' }}>
+                          ACTIVE
+                        </span>
+                      )}
+                    </td>
+                    <td>{s.location || '—'}</td>
+                    <td>
+                      <span className="badge badge-present">{s.activeWorkers ?? 0} Workers</span>
+                    </td>
+                    <td>{s.standardDailyHours || 8}h / day</td>
+                    <td>{s.currencySymbol || '₹'}</td>
+                    <td>
+                      <span className="badge badge-present">{s.status || 'active'}</span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        {!isActiveCurrent && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => selectSite(s._id)}
+                            title="Switch to manage this site"
+                          >
+                            Switch Site
+                          </button>
+                        )}
+                        {sites.length > 1 && (
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteSite(s)}
+                            title="Delete empty site"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-        {/* Construction Site Details */}
+        {/* 2. Current Selected Site Details */}
         <div className="register-panel">
           <div className="panel-header">
-            <h3>Construction Site Details</h3>
+            <h3>Active Site Details: {site?.name}</h3>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              Updates the settings for currently active site
+            </span>
           </div>
 
           {siteMessage && <div className="alert alert-success">{siteMessage}</div>}
@@ -130,7 +366,7 @@ export const SettingsPage = () => {
 
           <form onSubmit={handleSaveSite}>
             <div className="form-group">
-              <label>Construction Project / Site Name</label>
+              <label>Construction Project / Site Name *</label>
               <input
                 type="text"
                 className="form-control"
@@ -192,7 +428,7 @@ export const SettingsPage = () => {
           </form>
         </div>
 
-        {/* Owner Account Security */}
+        {/* 3. Owner Account Security */}
         <div className="register-panel">
           <div className="panel-header">
             <h3>Owner Account Security</h3>
